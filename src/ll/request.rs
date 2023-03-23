@@ -10,7 +10,6 @@ use std::{error, fmt, mem};
 
 use super::argument::ArgumentIterator;
 
-
 /// Error that may occur while reading and parsing a request from the kernel driver.
 #[derive(Debug)]
 pub enum RequestError {
@@ -27,16 +26,22 @@ pub enum RequestError {
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RequestError::ShortReadHeader(len) => write!(f, "Short read of FUSE request header ({} < {})", len, mem::size_of::<fuse_in_header>()),
+            RequestError::ShortReadHeader(len) => write!(
+                f,
+                "Short read of FUSE request header ({} < {})",
+                len,
+                mem::size_of::<fuse_in_header>()
+            ),
             RequestError::UnknownOperation(opcode) => write!(f, "Unknown FUSE opcode ({})", opcode),
-            RequestError::ShortRead(len, total) => write!(f, "Short read of FUSE request ({} < {})", len, total),
+            RequestError::ShortRead(len, total) => {
+                write!(f, "Short read of FUSE request ({} < {})", len, total)
+            }
             RequestError::InsufficientData => write!(f, "Insufficient argument data"),
         }
     }
 }
 
 impl error::Error for RequestError {}
-
 
 /// Filesystem operation (and arguments) the kernel driver wants us to perform. The fields of each
 /// variant needs to match the actual arguments the kernel driver sends for the specific operation.
@@ -154,28 +159,28 @@ pub enum Operation {
     },
     Destroy,
     // TODO: FUSE_IOCTL since ABI 7.11
-    // IoCtl {
-    //     arg: fuse_ioctl_in,
-    //     data: Vec<u8>,
-    // },
-    // TODO: FUSE_POLL since ABI 7.11
-    // Poll {
-    //     arg: fuse_poll_in,
-    // },
-    // TODO: FUSE_NOTIFY_REPLY since ABI 7.15
-    // NotifyReply {
-    //     data: Vec<u8>,
-    // },
-    // TODO: FUSE_BATCH_FORGET since ABI 7.16
-    // BatchForget {
-    //     arg: fuse_forget_in,
-    //     nodes: Vec<fuse_forget_one>,
-    // },
-    // TODO: FUSE_FALLOCATE since ABI 7.19
-    // FAllocate {
-    //     arg: fuse_fallocate_in,
-    // },
-
+    #[cfg(feature = "abi-7-11")]
+    IoCtl {
+        arg: fuse_ioctl_in,
+        data: Vec<u8>,
+    },
+    #[cfg(feature = "abi-7-11")]
+    Poll {
+        arg: fuse_poll_in,
+    },
+    #[cfg(feature = "abi-7-15")]
+    NotifyReply {
+        data: Vec<u8>,
+    },
+    #[cfg(feature = "abi-7-16")]
+    BatchForget {
+        arg: fuse_forget_in,
+        nodes: Vec<fuse_forget_one>,
+    },
+    #[cfg(feature = "abi-7-19")]
+    FAllocate {
+        arg: fuse_fallocate_in,
+    },
     #[cfg(target_os = "macos")]
     SetVolName {
         name: OsString,
@@ -188,11 +193,10 @@ pub enum Operation {
         oldname: OsString,
         newname: OsString,
     },
-
-    // TODO: CUSE_INIT since ABI 7.12
-    // CuseInit {
-    //     arg: fuse_init_in,
-    // },
+    #[cfg(feature = "abi-7-12")]
+    CuseInit {
+        arg: fuse_init_in,
+    },
 }
 
 impl<'a> fmt::Display for Operation {
@@ -234,7 +238,18 @@ impl<'a> fmt::Display for Operation {
             Operation::Interrupt { arg } => write!(f, "INTERRUPT unique {}", arg.unique),
             Operation::BMap { arg } => write!(f, "BMAP blocksize {}, ids {}", arg.blocksize, arg.block),
             Operation::Destroy => write!(f, "DESTROY"),
-
+            #[cfg(feature = "abi-7-11")]
+            Operation::IoCtl { arg, .. } => write!(f, "IOCTL fh {}", arg.fh),
+            #[cfg(feature = "abi-7-11")]
+            Operation::Poll {arg } => write!(f, "GETLK fh {}", arg.fh),
+            #[cfg(feature = "abi-7-15")]
+            Operation::NotifyReply{..}  => write!(f, "NOTIFY_REPLY"),
+            #[cfg(feature = "abi-7-16")]
+             Operation::BatchForget {..} => write!(f, "BATCH_FORGET fh "),
+            #[cfg(feature = "abi-7-19")]
+            Operation::FAllocate { .. }=> write!(f, "FALLOCATE fh"),
+            #[cfg(feature = "abi-7-12")]
+            Operation::CuseInit {..} => write!(f, "CUSEINIT fh"),
             #[cfg(target_os = "macos")]
             Operation::SetVolName { name } => write!(f, "SETVOLNAME name {:?}", name),
             #[cfg(target_os = "macos")]
@@ -252,9 +267,13 @@ impl Operation {
                 fuse_opcode::FUSE_LOOKUP => Operation::Lookup {
                     name: data.fetch_str()?.into(),
                 },
-                fuse_opcode::FUSE_FORGET => Operation::Forget { arg: *data.fetch()? },
+                fuse_opcode::FUSE_FORGET => Operation::Forget {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_GETATTR => Operation::GetAttr,
-                fuse_opcode::FUSE_SETATTR => Operation::SetAttr { arg: *data.fetch()? },
+                fuse_opcode::FUSE_SETATTR => Operation::SetAttr {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_READLINK => Operation::ReadLink,
                 fuse_opcode::FUSE_SYMLINK => Operation::SymLink {
                     name: data.fetch_str()?.into(),
@@ -283,15 +302,23 @@ impl Operation {
                     arg: *data.fetch()?,
                     name: data.fetch_str()?.into(),
                 },
-                fuse_opcode::FUSE_OPEN => Operation::Open { arg: *data.fetch()? },
-                fuse_opcode::FUSE_READ => Operation::Read { arg: *data.fetch()? },
+                fuse_opcode::FUSE_OPEN => Operation::Open {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_READ => Operation::Read {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_WRITE => Operation::Write {
                     arg: *data.fetch()?,
                     data: data.fetch_all().to_vec(),
                 },
                 fuse_opcode::FUSE_STATFS => Operation::StatFs,
-                fuse_opcode::FUSE_RELEASE => Operation::Release { arg: *data.fetch()? },
-                fuse_opcode::FUSE_FSYNC => Operation::FSync { arg: *data.fetch()? },
+                fuse_opcode::FUSE_RELEASE => Operation::Release {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_FSYNC => Operation::FSync {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_SETXATTR => Operation::SetXAttr {
                     arg: *data.fetch()?,
                     name: data.fetch_str()?.into(),
@@ -301,27 +328,87 @@ impl Operation {
                     arg: *data.fetch()?,
                     name: data.fetch_str()?.into(),
                 },
-                fuse_opcode::FUSE_LISTXATTR => Operation::ListXAttr { arg: *data.fetch()? },
+                fuse_opcode::FUSE_LISTXATTR => Operation::ListXAttr {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_REMOVEXATTR => Operation::RemoveXAttr {
                     name: data.fetch_str()?.into(),
                 },
-                fuse_opcode::FUSE_FLUSH => Operation::Flush { arg: *data.fetch()? },
-                fuse_opcode::FUSE_INIT => Operation::Init { arg: *data.fetch()? },
-                fuse_opcode::FUSE_OPENDIR => Operation::OpenDir { arg: *data.fetch()? },
-                fuse_opcode::FUSE_READDIR => Operation::ReadDir { arg: *data.fetch()? },
-                fuse_opcode::FUSE_RELEASEDIR => Operation::ReleaseDir { arg: *data.fetch()? },
-                fuse_opcode::FUSE_FSYNCDIR => Operation::FSyncDir { arg: *data.fetch()? },
-                fuse_opcode::FUSE_GETLK => Operation::GetLk { arg: *data.fetch()? },
-                fuse_opcode::FUSE_SETLK => Operation::SetLk { arg: *data.fetch()? },
-                fuse_opcode::FUSE_SETLKW => Operation::SetLkW { arg: *data.fetch()? },
-                fuse_opcode::FUSE_ACCESS => Operation::Access { arg: *data.fetch()? },
+                fuse_opcode::FUSE_FLUSH => Operation::Flush {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_INIT => Operation::Init {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_OPENDIR => Operation::OpenDir {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_READDIR => Operation::ReadDir {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_RELEASEDIR => Operation::ReleaseDir {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_FSYNCDIR => Operation::FSyncDir {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_GETLK => Operation::GetLk {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_SETLK => Operation::SetLk {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_SETLKW => Operation::SetLkW {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_ACCESS => Operation::Access {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_CREATE => Operation::Create {
                     arg: *data.fetch()?,
                     name: data.fetch_str()?.into(),
                 },
-                fuse_opcode::FUSE_INTERRUPT => Operation::Interrupt { arg: *data.fetch()? },
-                fuse_opcode::FUSE_BMAP => Operation::BMap { arg: *data.fetch()? },
+                fuse_opcode::FUSE_INTERRUPT => Operation::Interrupt {
+                    arg: *data.fetch()?,
+                },
+                fuse_opcode::FUSE_BMAP => Operation::BMap {
+                    arg: *data.fetch()?,
+                },
                 fuse_opcode::FUSE_DESTROY => Operation::Destroy,
+
+                #[cfg(feature = "abi-7-11")]
+                fuse_opcode::FUSE_IOCTL => Operation::IoCtl {
+                    arg: *data.fetch()?,
+                    data: data.fetch_all().to_vec(),
+                },
+                #[cfg(feature = "abi-7-11")]
+                fuse_opcode::FUSE_POLL => Operation::Poll {
+                    arg: *data.fetch()?,
+                },
+                #[cfg(feature = "abi-7-15")]
+                fuse_opcode::FUSE_NOTIFY_REPLY => Operation::NotifyReply {
+                    data: data.fetch_all().to_vec(),
+                },
+                #[cfg(feature = "abi-7-16")]
+                fuse_opcode::FUSE_BATCH_FORGET => {
+                    let arg = *data.fetch()?;
+                    let mut nodes: Vec<fuse_forget_one> = Vec::new();
+                    while let Some(node) = data.fetch::<fuse_forget_one>() {
+                        nodes.push(node.clone());
+                    }
+                    Operation::BatchForget {
+                        arg: arg,
+                        nodes: nodes,
+                    }
+                }
+                #[cfg(feature = "abi-7-19")]
+                fuse_opcode::FUSE_FALLOCATE => Operation::FAllocate {
+                    arg: *data.fetch()?,
+                },
+                #[cfg(feature = "abi-7-12")]
+                fuse_opcode::CUSE_INIT => Operation::CuseInit {
+                    arg: *data.fetch()?,
+                },
 
                 #[cfg(target_os = "macos")]
                 fuse_opcode::FUSE_SETVOLNAME => Operation::SetVolName {
@@ -340,7 +427,6 @@ impl Operation {
     }
 }
 
-
 /// Low-level request of a filesystem operation the kernel driver wants to perform.
 #[derive(Debug)]
 pub struct Request {
@@ -350,7 +436,11 @@ pub struct Request {
 
 impl fmt::Display for Request {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "FUSE({:3}) ino {:#018x}: {}", self.header.unique, self.header.nodeid, self.operation)
+        write!(
+            f,
+            "FUSE({:3}) ino {:#018x}: {}",
+            self.header.unique, self.header.nodeid, self.operation
+        )
     }
 }
 
@@ -422,7 +512,6 @@ impl Request {
         &self.operation
     }
 }
-
 
 #[cfg(test)]
 mod tests {

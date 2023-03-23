@@ -1,5 +1,5 @@
-use std::env;
 use async_fuse::Filesystem;
+use std::env;
 
 struct NullFS;
 

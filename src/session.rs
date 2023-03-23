@@ -5,14 +5,14 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use std::ffi::OsString;
-use std::io;
-use std::fmt;
-use std::path::{PathBuf, Path};
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{error, info};
-use std::sync::Arc;
+use std::ffi::OsString;
+use std::fmt;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::Arc;
 
 use crate::channel::{self, Channel};
 use crate::request::Request;
@@ -48,15 +48,13 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
     /// Create a new session by mounting the given filesystem to the given mountpoint
     pub fn new(filesystem: FS, mountpoint: &Path, options: &[OsString]) -> io::Result<Session<FS>> {
         info!("Mounting {}", mountpoint.display());
-        Channel::new(mountpoint, options).map(|ch| {
-            Session {
-                filesystem: filesystem,
-                ch: ch,
-                proto_major: AtomicU32::new(0),
-                proto_minor: AtomicU32::new(0),
-                initialized: AtomicBool::new(false),
-                destroyed: AtomicBool::new(false),
-            }
+        Channel::new(mountpoint, options).map(|ch| Session {
+            filesystem: filesystem,
+            ch: ch,
+            proto_major: AtomicU32::new(0),
+            proto_minor: AtomicU32::new(0),
+            initialized: AtomicBool::new(false),
+            destroyed: AtomicBool::new(false),
         })
     }
 
@@ -82,8 +80,8 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                     // Dispatch request
                     Some(req) => {
                         let se = se.clone();
-                        tokio::spawn( async move { req.dispatch(se).await });
-                    },
+                        tokio::spawn(async move { req.dispatch(se).await });
+                    }
                     // Quit loop on illegal request
                     None => break,
                 },
@@ -98,7 +96,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                     Some(ENODEV) => break,
                     // Unhandled error
                     _ => return Err(err),
-                }
+                },
             }
         }
         Ok(())
@@ -130,10 +128,15 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub unsafe fn new<FS: Filesystem + Send + Sync + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub unsafe fn new<FS: Filesystem + Send + Sync + 'static>(
+        se: Session<FS>,
+    ) -> io::Result<BackgroundSession> {
         let mountpoint = se.mountpoint().to_path_buf();
-        let handle = tokio::spawn ( async move { se.run() } );
-        Ok(BackgroundSession { mountpoint: mountpoint, handle: handle })
+        let handle = tokio::spawn(async move { se.run() });
+        Ok(BackgroundSession {
+            mountpoint: mountpoint,
+            handle: handle,
+        })
     }
 }
 
@@ -153,6 +156,10 @@ impl Drop for BackgroundSession {
 // thread_scoped::JoinGuard
 impl fmt::Debug for BackgroundSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "BackgroundSession {{ mountpoint: {:?}, guard: JoinGuard<()> }}", self.mountpoint)
+        write!(
+            f,
+            "BackgroundSession {{ mountpoint: {:?}, guard: JoinGuard<()> }}",
+            self.mountpoint
+        )
     }
 }
